@@ -2,7 +2,8 @@ import React from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import ImageCanvas from './ImageCanvas';
 
-const COMPONENT_OPTIONS = ['Original', 'Magnitude', 'Phase', 'Real', 'Imaginary'];
+const COMPONENT_OPTIONS_INPUT = ['Original', 'Greyscale', 'Magnitude', 'Phase', 'Real', 'Imaginary'];
+const COMPONENT_OPTIONS_OUTPUT = ['Magnitude', 'Phase', 'Real', 'Imaginary'];
 
 const ImageViewerContainer = ({ id, type, title }) => {
   const imageState = useAppStore(state =>
@@ -10,21 +11,25 @@ const ImageViewerContainer = ({ id, type, title }) => {
   );
   const setComponentType = useAppStore(state => state.setComponentType);
 
+  const componentOptions = type === 'input' ? COMPONENT_OPTIONS_INPUT : COMPONENT_OPTIONS_OUTPUT;
+
   return (
     <div className="flex flex-col h-full panel-bg panel-border">
       {/* Header */}
       <div className="flex items-center justify-between p-2 border-b border-border bg-surface-lighter h-10">
         <h3 className="font-semibold text-sm italic">{title}</h3>
-        <select
-          className="bg-background border border-border rounded text-xs p-1 focus:border-primary outline-none"
-          value={imageState.componentType}
-          onChange={(e) => setComponentType(id, type, e.target.value)}
-          disabled={!imageState.hasImage}
-        >
-          {COMPONENT_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
+        {type === 'input' && (
+          <select
+            className="bg-background border border-border rounded text-xs p-1 focus:border-primary outline-none"
+            value={imageState.componentType}
+            onChange={(e) => setComponentType(id, type, e.target.value)}
+            disabled={!imageState.hasImage}
+          >
+            {componentOptions.map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Canvas Area */}

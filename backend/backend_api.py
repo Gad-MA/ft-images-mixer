@@ -82,7 +82,9 @@ class BackendAPI:
         try:
             processor = self.image_processors[image_index]
             processor.image = image_array.astype(np.float64)
+            processor.color_image = processor.image.copy()  # Keep colored version
             processor.original_image = processor.image.copy()
+            processor.fft_cached = False  # Invalidate FFT cache
             processor.convert_to_grayscale()
             
             return {
@@ -165,7 +167,7 @@ class BackendAPI:
         
         Args:
             image_index (int): Index (0-3) of the image
-            component_type (str): 'magnitude', 'phase', 'real', or 'imaginary'
+            component_type (str): 'magnitude', 'phase', 'real', 'imaginary', or 'color'
             
         Returns:
             dict: Component data as displayable array
@@ -174,6 +176,25 @@ class BackendAPI:
             return {'success': False, 'error': 'Invalid image index'}
         
         processor = self.image_processors[image_index]
+        
+        # Handle color image separately (doesn't need FFT)
+        if component_type == 'color':
+            if processor.color_image is None:
+                return {'success': False, 'error': 'No colored image available'}
+            try:
+                # Normalize colored image to 0-255 range
+                img_normalized = ComponentVisualizer.normalize_for_display(
+                    processor.color_image, 0, 255
+                ).astype(np.uint8)
+                return {
+                    'success': True,
+                    'component_array': img_normalized,
+                    'component_type': 'color',
+                    'shape': img_normalized.shape
+                }
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+        
         if processor.fft_result is None:
             return {'success': False, 'error': 'FFT not computed for this image'}
         
@@ -191,7 +212,7 @@ class BackendAPI:
                 return {'success': False, 'error': 'Invalid component type'}
             
             # Get brightness/contrast settings for this component
-            settings = self.component_display_settings[image_index][component_type]
+            settings = self.component_display_settings[image_index].get(component_type, {'brightness': 0, 'contrast': 1.0})
             brightness = settings['brightness']
             contrast = settings['contrast']
             
@@ -263,33 +284,71 @@ class BackendAPI:
             dict: Mixed output image
         """
         try:
-            # Validate that all images have FFT computed
-            if any(p.fft_result is None for p in self.image_processors):
+            # Get active slots from settings (or use all loaded if not specified)
+            active_slots = settings.get('active_slots', None)
+            
+            if active_slots is not None:
+                # Use only specified slots
+                loaded_processors = [self.image_processors[i] for i in active_slots if self.image_processors[i].image is not None]
+            else:
+                # Fallback to all loaded (backward compatibility)
+                loaded_processors = [p for p in self.image_processors if p.image is not None]
+            
+            if len(loaded_processors) == 0:
+                return {'success': False, 'error': 'No images loaded'}
+            
+            # Check if FFT computed for all loaded images
+            if any(p.fft_result is None for p in loaded_processors):
                 return {
                     'success': False,
-                    'error': 'Not all images have FFT computed. Call resize_all_images() first.'
+                    'error': 'Not all loaded images have FFT computed. Call resize_all_images() first.'
                 }
             
-            # Create or reuse mixer
-            if self.mixer is None:
-                self.mixer = FourierMixer(self.image_processors)
+            # Validate uniform FFT shapes
+            fft_shapes = [p.fft_result.shape for p in loaded_processors]
+            if len(set(fft_shapes)) > 1:
+                return {
+                    'success': False,
+                    'error': f'Image sizes mismatch: {fft_shapes}. Call resize_all_images() first.'
+                }
+            
+            # Create mixer with ONLY active processors
+            self.mixer = FourierMixer(loaded_processors)
             
             # Set mode
             mode = settings.get('mode', 'magnitude_phase')
             self.mixer.set_mode(mode)
             
-            # Set weights
+            # Set weights - filter to match only active slots
             weights = settings.get('weights', {})
-            if mode == 'magnitude_phase':
-                mag_weights = weights.get('magnitude', [0.25, 0.25, 0.25, 0.25])
-                phase_weights = weights.get('phase', [0.25, 0.25, 0.25, 0.25])
-                self.mixer.set_weights('magnitude', mag_weights)
-                self.mixer.set_weights('phase', phase_weights)
-            else:  # real_imaginary
-                real_weights = weights.get('real', [0.25, 0.25, 0.25, 0.25])
-                imag_weights = weights.get('imaginary', [0.25, 0.25, 0.25, 0.25])
-                self.mixer.set_weights('real', real_weights)
-                self.mixer.set_weights('imaginary', imag_weights)
+            if active_slots is not None:
+                # Extract weights only for active slots
+                if mode == 'magnitude_phase':
+                    all_mag_weights = weights.get('magnitude', [0.25, 0.25, 0.25, 0.25])
+                    all_phase_weights = weights.get('phase', [0.25, 0.25, 0.25, 0.25])
+                    mag_weights = [all_mag_weights[i] for i in active_slots]
+                    phase_weights = [all_phase_weights[i] for i in active_slots]
+                    self.mixer.set_weights('magnitude', mag_weights)
+                    self.mixer.set_weights('phase', phase_weights)
+                else:  # real_imaginary
+                    all_real_weights = weights.get('real', [0.25, 0.25, 0.25, 0.25])
+                    all_imag_weights = weights.get('imaginary', [0.25, 0.25, 0.25, 0.25])
+                    real_weights = [all_real_weights[i] for i in active_slots]
+                    imag_weights = [all_imag_weights[i] for i in active_slots]
+                    self.mixer.set_weights('real', real_weights)
+                    self.mixer.set_weights('imaginary', imag_weights)
+            else:
+                # Use all weights as-is (backward compatibility)
+                if mode == 'magnitude_phase':
+                    mag_weights = weights.get('magnitude', [0.25, 0.25, 0.25, 0.25])
+                    phase_weights = weights.get('phase', [0.25, 0.25, 0.25, 0.25])
+                    self.mixer.set_weights('magnitude', mag_weights)
+                    self.mixer.set_weights('phase', phase_weights)
+                else:  # real_imaginary
+                    real_weights = weights.get('real', [0.25, 0.25, 0.25, 0.25])
+                    imag_weights = weights.get('imaginary', [0.25, 0.25, 0.25, 0.25])
+                    self.mixer.set_weights('real', real_weights)
+                    self.mixer.set_weights('imaginary', imag_weights)
             
             # Set region
             region = settings.get('region', {})

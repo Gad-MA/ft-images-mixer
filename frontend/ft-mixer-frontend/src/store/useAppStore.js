@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api } from '../utils/api'; // IMPORT REAL API
+import { api } from '../utils/api'; 
 
 // ... (Keep createInitialImageState same as before) ...
 const createInitialImageState = (id, type) => ({
@@ -31,6 +31,7 @@ export const useAppStore = create((set, get) => ({
   },
 
   processingStatus: { isProcessing: false, progress: 0 },
+  lastMixTime: 0, // Timestamp of last successful mix
 
   // --- ACTIONS ---
 
@@ -71,15 +72,18 @@ export const useAppStore = create((set, get) => ({
   },
 
   setComponentType: async (slotId, type, component) => {
-    // Optimistic update
+    // Update component type
     set(state => {
       const targetArray = type === 'input' ? 'inputImages' : 'outputImages';
       const newImages = [...state[targetArray]];
-      newImages[slotId].componentType = component;
+      newImages[slotId] = {
+        ...newImages[slotId],
+        componentType: component
+      };
       return { [targetArray]: newImages };
     });
-    // Fetch real view
-    get().fetchImageView(slotId, type);
+    // Fetch the new component view
+    await get().fetchImageView(slotId, type);
   },
 
     setBrightnessContrast: (slotId, type, bValue, cValue) => {
@@ -106,15 +110,26 @@ export const useAppStore = create((set, get) => ({
         if (!imgState.hasImage && type === 'input') return;
 
         try {
-            // ALWAYS Request RAW data (B=0, C=1.0)
-            // This prevents the backend from destructively modifying the source image
+            // Map component names to API expected values
+            // Original -> color, Greyscale -> grayscale, others lowercase
+            let apiComponent = imgState.componentType.toLowerCase();
+            if (imgState.componentType === 'Original') {
+                apiComponent = 'color';
+            } else if (imgState.componentType === 'Greyscale') {
+                apiComponent = 'grayscale';
+            }
+            
+            // Request RAW data only - brightness/contrast applied in CSS
             const result = await api.getView(
                 slotId, 
                 type, 
-                imgState.componentType, 
-                0,   // Always 0
-                1.0  // Always 1.0
+                apiComponent
             );
+
+            if (!result.success) {
+                console.error(`Failed to fetch ${type} view:`, result.error);
+                return;
+            }
 
             if (result.success) {
                 set(state => {
@@ -174,41 +189,63 @@ export const useAppStore = create((set, get) => ({
       
       // Cancel if already running
       if (processingStatus.isProcessing) {
-          await api.cancelMixing();
+          return; // Just ignore if already processing
       }
 
+      // Simulate progress in frontend
       set({ processingStatus: { isProcessing: true, progress: 0 } });
 
-      // --- FIX STARTS HERE ---
+      // Animate progress
+      let progress = 0;
+      const progressInterval = setInterval(() => {
+          progress += 10;
+          if (progress <= 90) {
+              set({ processingStatus: { isProcessing: true, progress } });
+          }
+      }, 50); // Update every 50ms
+
       // Map frontend state names to backend expected names
+      // Include only the slots that have images loaded
+      const activeSlots = get().inputImages
+          .filter(img => img.hasImage)
+          .map(img => img.id);
+      
+      // ALWAYS send all 4 weight sets (magnitude, phase, real, imaginary)
+      // Backend will use the appropriate ones based on mode
       const apiPayload = {
-          ...mixerSettings,
-          output_port: mixerSettings.targetOutputPort // Backend expects 'output_port', not 'targetOutputPort'
+          mode: mixerSettings.mode,
+          weights: {
+              magnitude: mixerSettings.weights.magnitude,
+              phase: mixerSettings.weights.phase,
+              real: mixerSettings.weights.real,
+              imaginary: mixerSettings.weights.imaginary
+          },
+          region: mixerSettings.region,
+          output_port: mixerSettings.targetOutputPort,
+          active_slots: activeSlots // Tell backend which images to use
       };
-      // --- FIX ENDS HERE ---
 
       try {
-          // Use apiPayload instead of mixerSettings
+          // Call mixing API (no polling needed)
           await api.startMixing(apiPayload);
-
-          // Start Polling Loop
-          const pollInterval = setInterval(async () => {
-              const status = await api.getProgress();
-              
-              set({ processingStatus: { 
-                  isProcessing: status.is_processing, 
-                  progress: status.progress 
-              }});
-
-              if (!status.is_processing) {
-                  clearInterval(pollInterval);
-                  // Fetch the final result for the target port
-                  get().fetchImageView(mixerSettings.targetOutputPort, 'output');
-              }
-          }, 200); // Check every 200ms
+          
+          // Clear progress animation
+          clearInterval(progressInterval);
+          
+          // Set to complete
+          set({ processingStatus: { isProcessing: false, progress: 100 }, lastMixTime: Date.now() });
+          
+          // Fetch the result ONCE
+          await get().fetchImageView(mixerSettings.targetOutputPort, 'output');
+          
+          // Reset progress after a short delay
+          setTimeout(() => {
+              set({ processingStatus: { isProcessing: false, progress: 0 } });
+          }, 500);
 
       } catch (err) {
           console.error("Mixing failed", err);
+          clearInterval(progressInterval);
           set({ processingStatus: { isProcessing: false, progress: 0 } });
       }
     },

@@ -17,10 +17,12 @@ class ImageProcessor:
     """
     
     def __init__(self):
-        self.image = None
+        self.image = None  # Grayscale image for processing
+        self.color_image = None  # Original colored image
         self.fft_result = None
         self.original_image = None
         self.image_path = None
+        self.fft_cached = False  # Track if FFT is up to date
     
     
     def load_image(self, path):
@@ -40,8 +42,10 @@ class ImageProcessor:
         try:
             img = Image.open(path)
             self.image = np.array(img, dtype=np.float64)
+            self.color_image = self.image.copy()  # Keep colored version
             self.original_image = self.image.copy()
             self.image_path = path
+            self.fft_cached = False  # Invalidate FFT cache
             print(f"✅ Image loaded: {path}")
             print(f"   Shape: {self.image.shape}, Dtype: {self.image.dtype}")
             return self.image
@@ -66,6 +70,9 @@ class ImageProcessor:
         if len(self.image.shape) == 3 and self.image.shape[2] >= 3:
             # Convert to grayscale using luminosity method
             self.image = np.dot(self.image[..., :3], [0.299, 0.587, 0.114])
+            # Invalidate FFT cache since image changed
+            self.fft_cached = False
+            self.fft_result = None
             print(f"✅ Converted to grayscale. New shape: {self.image.shape}")
         else:
             print(f"ℹ️  Image is already grayscale.")
@@ -102,14 +109,22 @@ class ImageProcessor:
         # Convert back to numpy array
         self.image = np.array(resized_pil, dtype=np.float64)
         
+        # Invalidate FFT cache since image dimensions changed
+        self.fft_cached = False
+        self.fft_result = None
+        
         print(f"✅ Image resized to: {target_size}")
         return self.image
     
     
-    def compute_fft(self):
+    def compute_fft(self, force=False):
         """
         Compute the 2D Fast Fourier Transform of the image.
         Uses fftshift to center the DC component (zero frequency).
+        Caches result to avoid recomputation.
+        
+        Args:
+            force (bool): Force recomputation even if cached
         
         Returns:
             np.ndarray: Complex FFT result (centered)
@@ -117,8 +132,14 @@ class ImageProcessor:
         if self.image is None:
             raise ValueError("❌ No image loaded. Call load_image() first.")
         
+        # Return cached FFT if available and not forcing
+        if self.fft_cached and not force and self.fft_result is not None:
+            print(f"⚡ Using cached FFT. Shape: {self.fft_result.shape}")
+            return self.fft_result
+        
         # Compute 2D FFT and shift zero frequency to center
         self.fft_result = np.fft.fftshift(np.fft.fft2(self.image))
+        self.fft_cached = True
         
         print(f"✅ FFT computed. Shape: {self.fft_result.shape}")
         print(f"   FFT dtype: {self.fft_result.dtype}")

@@ -63,26 +63,23 @@ def upload_image(slot_id):
 @app.route('/view/<int:slot_id>/<component_type>', methods=['GET'])
 def get_component_view(slot_id, component_type):
     """
-    Get a specific component view (Magnitude, Phase, etc.)[cite: 9].
-    Supports brightness/contrast params.
+    Get a specific component view.
+    Brightness/contrast handled in frontend only.
     """
     try:
-        # Get query parameters for brightness/contrast
-        brightness = float(request.args.get('brightness', 0))
-        contrast = float(request.args.get('contrast', 1.0))
-        
-        # Update settings in backend
-        api.apply_component_brightness_contrast(slot_id, component_type.lower(), brightness, contrast)
-        
-        # Fetch data
+        # Map frontend component names to backend data
+        # 'Original' = colored RGB image
+        # 'Greyscale' = grayscale image
         if component_type == 'Original':
+            # Return colored original image
+            data = api.get_component_data(slot_id, 'color')
+            key = 'component_array'
+        elif component_type == 'Greyscale':
+            # Return grayscale image
             data = api.get_image_data(slot_id)
-            # Apply B/C for original image specifically
-            if brightness != 0 or contrast != 1.0:
-                api.apply_brightness_contrast(slot_id, brightness, contrast)
-                data = api.get_image_data(slot_id) # Re-fetch after apply
             key = 'image_array'
         else:
+            # FFT components
             data = api.get_component_data(slot_id, component_type.lower())
             key = 'component_array'
             
@@ -118,15 +115,7 @@ def cancel_mixing():
 
 @app.route('/output/<int:port_id>', methods=['GET'])
 def get_output(port_id):
-    """Get the mixed result for a specific port[cite: 11]."""
-    # Check brightness/contrast for output
-    brightness = float(request.args.get('brightness', 0))
-    contrast = float(request.args.get('contrast', 1.0))
-    
-    # Apply if needed
-    if brightness != 0 or contrast != 1.0:
-        api.apply_brightness_contrast(port_id + 4, brightness, contrast) # Ports are index 4,5 internally
-    
+    """Get the mixed result for a specific port. Brightness/contrast handled in frontend."""
     data = api.get_output_image(port_id)
     if not data.get('success'):
         # If empty, return a null success to clear viewer
