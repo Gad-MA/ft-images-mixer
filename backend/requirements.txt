@@ -1,0 +1,6 @@
+numpy
+Pillow
+scipy
+matplotlib
+flask
+flask-cors
