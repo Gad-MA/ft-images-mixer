@@ -32,13 +32,24 @@ export const useAppStore = create((set, get) => ({
 
   processingStatus: { isProcessing: false, progress: 0 },
   lastMixTime: 0, // Timestamp of last successful mix
+  hasAnyImages: false, // Track if any images are loaded
 
   // --- ACTIONS ---
 
   loadImage: async (slotId, file) => {
+    // Clear the image slot completely before loading new image
     set(state => {
         const newInputs = [...state.inputImages];
-        newInputs[slotId].isLoading = true;
+        newInputs[slotId] = {
+          ...newInputs[slotId],
+          hasImage: false,  // Clear this first to trigger refresh
+          src: null,
+          isLoading: true,
+          brightness: 0,
+          contrast: 1.0
+        };
+        
+        // Keep output images for comparison - they will be updated when mixing happens
         return { inputImages: newInputs };
     });
 
@@ -59,6 +70,7 @@ export const useAppStore = create((set, get) => ({
             });
             // Update other images (sizes might have changed due to "One Size" rule)
             get().refreshAllViews(); 
+            // Trigger mixing to show immediate result
             get().triggerMixing();
         }
     } catch (err) {
@@ -185,7 +197,13 @@ export const useAppStore = create((set, get) => ({
   },
 
   triggerMixing: async () => {
-      const { mixerSettings, processingStatus } = get();
+      const { mixerSettings, processingStatus, inputImages } = get();
+      
+      // Don't mix if no images are loaded
+      const hasAnyImages = inputImages.some(img => img.hasImage);
+      if (!hasAnyImages) {
+          return; // No images to mix
+      }
       
       // Cancel if already running
       if (processingStatus.isProcessing) {
@@ -226,6 +244,15 @@ export const useAppStore = create((set, get) => ({
       };
 
       try {
+          // Clear only the target output before mixing (keep other output intact for comparison)
+          set(state => ({
+              outputImages: state.outputImages.map((output, idx) => 
+                  idx === mixerSettings.targetOutputPort 
+                      ? { ...output, hasImage: false, src: null }
+                      : output  // Keep other outputs unchanged
+              )
+          }));
+          
           // Call mixing API (no polling needed)
           await api.startMixing(apiPayload);
           
@@ -235,7 +262,7 @@ export const useAppStore = create((set, get) => ({
           // Set to complete
           set({ processingStatus: { isProcessing: false, progress: 100 }, lastMixTime: Date.now() });
           
-          // Fetch the result ONCE
+          // Fetch the result ONCE for the target output only
           await get().fetchImageView(mixerSettings.targetOutputPort, 'output');
           
           // Reset progress after a short delay

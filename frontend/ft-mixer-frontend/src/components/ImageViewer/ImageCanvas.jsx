@@ -70,7 +70,7 @@ const ImageCanvas = ({ id, type, imageState }) => {
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept="image/png, image/jpeg"
+        accept="image/png, image/jpeg, image/jpg, image/webp"
         onChange={handleFileChange}
       />
 

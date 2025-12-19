@@ -17,21 +17,24 @@ class FourierMixer:
         Initialize the FourierMixer with ImageProcessor instances.
         
         Args:
-            image_processors (list): List of 4 ImageProcessor instances
+            image_processors (list): List of 1-4 ImageProcessor instances
         """
-        if len(image_processors) != 4:
-            raise ValueError("FourierMixer requires exactly 4 ImageProcessor instances")
+        if not image_processors or len(image_processors) > 4:
+            raise ValueError("FourierMixer requires between 1 and 4 ImageProcessor instances")
         
         # Validate all images have same size (if loaded)
         self._validate_uniform_sizes(image_processors)
         
         self.processors = image_processors
+        self.num_processors = len(image_processors)
         self.mode = 'magnitude_phase'  # or 'real_imaginary'
+        
+        # Initialize weights based on number of processors
         self.weights = {
-            'magnitude': [0.0, 0.0, 0.0, 0.0],
-            'phase': [0.0, 0.0, 0.0, 0.0],
-            'real': [0.0, 0.0, 0.0, 0.0],
-            'imaginary': [0.0, 0.0, 0.0, 0.0]
+            'magnitude': [0.0] * self.num_processors,
+            'phase': [0.0] * self.num_processors,
+            'real': [0.0] * self.num_processors,
+            'imaginary': [0.0] * self.num_processors
         }
         
         # Region selection
@@ -86,8 +89,8 @@ class FourierMixer:
         if component_type not in ['magnitude', 'phase', 'real', 'imaginary']:
             raise ValueError("Invalid component_type")
         
-        if len(weights) != 4:
-            raise ValueError("Must provide exactly 4 weights")
+        if len(weights) != self.num_processors:
+            raise ValueError(f"Must provide exactly {self.num_processors} weights (matching number of loaded images)")
         
         if any(w < 0 for w in weights):
             raise ValueError("Weights must be non-negative")

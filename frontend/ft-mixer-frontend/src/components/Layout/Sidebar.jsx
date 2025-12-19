@@ -94,7 +94,7 @@ const Sidebar = () => {
                      <h3 className="text-sm font-bold border-b border-border pb-1">{component1Name} Weights</h3>
                      {weights1.map((w, idx) => (
                          <div key={`${component1Name}-${idx}`} className="flex items-center space-x-2">
-                             <span className="text-xs text-text-muted w-12">Img {idx + 1}</span>
+                             <span className="text-xs text-text-muted w-10 flex-shrink-0">Img {idx + 1}</span>
                              <Slider value={w} onChange={(val) => setWeight(component1Name.toLowerCase(), idx, val)} />
                          </div>
                      ))}
@@ -105,7 +105,7 @@ const Sidebar = () => {
                      <h3 className="text-sm font-bold border-b border-border pb-1">{component2Name} Weights</h3>
                      {weights2.map((w, idx) => (
                          <div key={`${component2Name}-${idx}`} className="flex items-center space-x-2">
-                             <span className="text-xs text-text-muted w-12">Img {idx + 1}</span>
+                             <span className="text-xs text-text-muted w-10 flex-shrink-0">Img {idx + 1}</span>
                              <Slider value={w} onChange={(val) => setWeight(component2Name.toLowerCase(), idx, val)} />
                          </div>
                      ))}

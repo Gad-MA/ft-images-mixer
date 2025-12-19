@@ -287,12 +287,15 @@ class BackendAPI:
             # Get active slots from settings (or use all loaded if not specified)
             active_slots = settings.get('active_slots', None)
             
+            # Filter to only slots that actually have images loaded
             if active_slots is not None:
-                # Use only specified slots
-                loaded_processors = [self.image_processors[i] for i in active_slots if self.image_processors[i].image is not None]
+                # Use only specified slots that have images
+                actual_active_slots = [i for i in active_slots if self.image_processors[i].image is not None]
+                loaded_processors = [self.image_processors[i] for i in actual_active_slots]
             else:
                 # Fallback to all loaded (backward compatibility)
                 loaded_processors = [p for p in self.image_processors if p.image is not None]
+                actual_active_slots = [i for i, p in enumerate(self.image_processors) if p.image is not None]
             
             if len(loaded_processors) == 0:
                 return {'success': False, 'error': 'No images loaded'}
@@ -319,36 +322,24 @@ class BackendAPI:
             mode = settings.get('mode', 'magnitude_phase')
             self.mixer.set_mode(mode)
             
-            # Set weights - filter to match only active slots
+            # Set weights - filter to match only active loaded slots
             weights = settings.get('weights', {})
-            if active_slots is not None:
-                # Extract weights only for active slots
-                if mode == 'magnitude_phase':
-                    all_mag_weights = weights.get('magnitude', [0.25, 0.25, 0.25, 0.25])
-                    all_phase_weights = weights.get('phase', [0.25, 0.25, 0.25, 0.25])
-                    mag_weights = [all_mag_weights[i] for i in active_slots]
-                    phase_weights = [all_phase_weights[i] for i in active_slots]
-                    self.mixer.set_weights('magnitude', mag_weights)
-                    self.mixer.set_weights('phase', phase_weights)
-                else:  # real_imaginary
-                    all_real_weights = weights.get('real', [0.25, 0.25, 0.25, 0.25])
-                    all_imag_weights = weights.get('imaginary', [0.25, 0.25, 0.25, 0.25])
-                    real_weights = [all_real_weights[i] for i in active_slots]
-                    imag_weights = [all_imag_weights[i] for i in active_slots]
-                    self.mixer.set_weights('real', real_weights)
-                    self.mixer.set_weights('imaginary', imag_weights)
-            else:
-                # Use all weights as-is (backward compatibility)
-                if mode == 'magnitude_phase':
-                    mag_weights = weights.get('magnitude', [0.25, 0.25, 0.25, 0.25])
-                    phase_weights = weights.get('phase', [0.25, 0.25, 0.25, 0.25])
-                    self.mixer.set_weights('magnitude', mag_weights)
-                    self.mixer.set_weights('phase', phase_weights)
-                else:  # real_imaginary
-                    real_weights = weights.get('real', [0.25, 0.25, 0.25, 0.25])
-                    imag_weights = weights.get('imaginary', [0.25, 0.25, 0.25, 0.25])
-                    self.mixer.set_weights('real', real_weights)
-                    self.mixer.set_weights('imaginary', imag_weights)
+            # Extract weights only for actual loaded slots
+            if mode == 'magnitude_phase':
+                all_mag_weights = weights.get('magnitude', [0.5, 0.5, 0.5, 0.5])
+                all_phase_weights = weights.get('phase', [0.5, 0.5, 0.5, 0.5])
+                mag_weights = [all_mag_weights[i] for i in actual_active_slots]
+                phase_weights = [all_phase_weights[i] for i in actual_active_slots]
+                self.mixer.set_weights('magnitude', mag_weights)
+                self.mixer.set_weights('phase', phase_weights)
+            else:  # real_imaginary
+                all_real_weights = weights.get('real', [0.5, 0.5, 0.5, 0.5])
+                all_imag_weights = weights.get('imaginary', [0.5, 0.5, 0.5, 0.5])
+                real_weights = [all_real_weights[i] for i in actual_active_slots]
+                imag_weights = [all_imag_weights[i] for i in actual_active_slots]
+                self.mixer.set_weights('real', real_weights)
+                self.mixer.set_weights('imaginary', imag_weights)
+
             
             # Set region
             region = settings.get('region', {})
@@ -397,20 +388,46 @@ class BackendAPI:
                 settings (dict): Same as mix_images()
                 callback (function): Function to call with result
             """
-            if self.mixer is None:
-                self.mixer = FourierMixer(self.image_processors)
+            # Get active slots from settings or use all loaded
+            active_slots = settings.get('active_slots', None)
+            
+            # Filter to only slots that actually have images loaded
+            if active_slots is not None:
+                # Use only specified slots that have images
+                actual_active_slots = [i for i in active_slots if self.image_processors[i].image is not None]
+                loaded_processors = [self.image_processors[i] for i in actual_active_slots]
+            else:
+                # Fallback to all loaded
+                loaded_processors = [p for p in self.image_processors if p.image is not None]
+                actual_active_slots = [i for i, p in enumerate(self.image_processors) if p.image is not None]
+            
+            if len(loaded_processors) == 0:
+                callback({'success': False, 'error': 'No images loaded'}, 0)
+                return
+            
+            # Create mixer with ONLY loaded processors
+            self.mixer = FourierMixer(loaded_processors)
             
             # Set all parameters (same as mix_images)
             mode = settings.get('mode', 'magnitude_phase')
             self.mixer.set_mode(mode)
             
             weights = settings.get('weights', {})
+            # Extract weights only for actual loaded slots
             if mode == 'magnitude_phase':
-                self.mixer.set_weights('magnitude', weights.get('magnitude', [0.25]*4))
-                self.mixer.set_weights('phase', weights.get('phase', [0.25]*4))
+                all_mag_weights = weights.get('magnitude', [0.5]*4)
+                all_phase_weights = weights.get('phase', [0.5]*4)
+                mag_weights = [all_mag_weights[i] for i in actual_active_slots]
+                phase_weights = [all_phase_weights[i] for i in actual_active_slots]
+                self.mixer.set_weights('magnitude', mag_weights)
+                self.mixer.set_weights('phase', phase_weights)
             else:
-                self.mixer.set_weights('real', weights.get('real', [0.25]*4))
-                self.mixer.set_weights('imaginary', weights.get('imaginary', [0.25]*4))
+                all_real_weights = weights.get('real', [0.5]*4)
+                all_imag_weights = weights.get('imaginary', [0.5]*4)
+                real_weights = [all_real_weights[i] for i in actual_active_slots]
+                imag_weights = [all_imag_weights[i] for i in actual_active_slots]
+                self.mixer.set_weights('real', real_weights)
+                self.mixer.set_weights('imaginary', imag_weights)
             
             region = settings.get('region', {})
             self.mixer.set_region(

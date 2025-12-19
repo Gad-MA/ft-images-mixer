@@ -70,6 +70,7 @@ def get_component_view(slot_id, component_type):
         # Map frontend component names to backend data
         # 'Original' = colored RGB image
         # 'Greyscale' = grayscale image
+        # 'Magnitude', 'Phase', 'Real', 'Imaginary' = FFT components
         if component_type == 'Original':
             # Return colored original image
             data = api.get_component_data(slot_id, 'color')
@@ -79,7 +80,7 @@ def get_component_view(slot_id, component_type):
             data = api.get_image_data(slot_id)
             key = 'image_array'
         else:
-            # FFT components
+            # FFT components - convert to lowercase for backend
             data = api.get_component_data(slot_id, component_type.lower())
             key = 'component_array'
             

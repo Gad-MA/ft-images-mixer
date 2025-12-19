@@ -4,14 +4,12 @@ const Slider = ({ label, value, onChange, min = 0, max = 1, step = 0.01, disable
   const percentage = ((value - min) / (max - min)) * 100;
 
   return (
-    <div className="flex flex-col space-y-1 w-full">
-      {label && (
-        <div className="flex justify-between text-xs text-text-muted">
-          <span>{label}</span>
-          <span>{Math.round(percentage)}%</span>
-        </div>
-      )}
-      <div className="relative w-full h-4 flex items-center">
+    <div className="flex items-center space-x-2 w-full">
+      {/* Value display - Before the slider */}
+      <div className="text-xs font-mono text-text-muted w-10 text-right flex-shrink-0">
+         {value.toFixed(2)}
+      </div>
+      <div className="relative flex-1 h-4 flex items-center">
           {/* Custom track background */}
         <div className="absolute bg-surface-lighter h-1 w-full rounded-full overflow-hidden">
            {/* Filled track */}
