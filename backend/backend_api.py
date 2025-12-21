@@ -341,12 +341,18 @@ class BackendAPI:
                 self.mixer.set_weights('imaginary', imag_weights)
 
             
-            # Set region
+            # Set region (support per-component region types sent from frontend)
             region = settings.get('region', {})
             if region.get('enabled', False):
+                # If frontend sent per-component keys, forward them as a dict
+                if any(k in region for k in ['magnitude', 'phase', 'real', 'imaginary']):
+                    region_type = {k: region.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+                else:
+                    region_type = region.get('type', 'inner')
+
                 self.mixer.set_region(
                     size=region.get('size', 0.3),
-                    region_type=region.get('type', 'inner'),
+                    region_type=region_type,
                     enabled=True
                 )
             else:
@@ -430,9 +436,14 @@ class BackendAPI:
                 self.mixer.set_weights('imaginary', imag_weights)
             
             region = settings.get('region', {})
+            if any(k in region for k in ['magnitude', 'phase', 'real', 'imaginary']):
+                region_type = {k: region.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+            else:
+                region_type = region.get('type', 'inner')
+
             self.mixer.set_region(
                 size=region.get('size', 0.3),
-                region_type=region.get('type', 'inner'),
+                region_type=region_type,
                 enabled=region.get('enabled', False)
             )
             

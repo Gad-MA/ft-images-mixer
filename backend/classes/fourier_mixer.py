@@ -40,7 +40,13 @@ class FourierMixer:
         # Region selection
         self.region_enabled = False
         self.region_size = 0.3  # 30% of image size (percentage)
-        self.region_type = 'inner'  # 'inner' or 'outer'
+        # Per-component region types (allows 'inner'/'outer' per FFT component)
+        self.per_component_region = {
+            'magnitude': 'inner',
+            'phase': 'inner',
+            'real': 'inner',
+            'imaginary': 'inner'
+        }
         
         # Output port selection (1 or 2)
         self.target_output_port = 1
@@ -100,18 +106,33 @@ class FourierMixer:
     
     
     def set_region(self, size, region_type='inner', enabled=True):
-        """Set frequency region parameters."""
+        """Set frequency region parameters.
+
+        `region_type` may be either a string 'inner'/'outer' applied to all components,
+        or a dict mapping component names to 'inner'/'outer'.
+        """
         if not 0.0 <= size <= 1.0:
             raise ValueError("Region size must be between 0.0 and 1.0")
-        
-        if region_type not in ['inner', 'outer']:
-            raise ValueError("Region type must be 'inner' or 'outer'")
-        
+
+        # Accept either dict or single type
+        if isinstance(region_type, dict):
+            for comp, rt in region_type.items():
+                if rt not in ['inner', 'outer']:
+                    raise ValueError("Region type must be 'inner' or 'outer'")
+            # Update per-component types, keep missing keys as-is
+            for comp in self.per_component_region.keys():
+                if comp in region_type:
+                    self.per_component_region[comp] = region_type[comp]
+        else:
+            if region_type not in ['inner', 'outer']:
+                raise ValueError("Region type must be 'inner' or 'outer'")
+            for comp in self.per_component_region.keys():
+                self.per_component_region[comp] = region_type
+
         self.region_size = size
-        self.region_type = region_type
         self.region_enabled = enabled
-        
-        print(f"✅ Region set: size={size*100}%, type={region_type}, enabled={enabled}")
+
+        print(f"✅ Region set: size={size*100}%, per_component={self.per_component_region}, enabled={enabled}")
     
     
     def set_region_from_coordinates(self, x1, y1, x2, y2, region_type='inner'):
@@ -156,45 +177,53 @@ class FourierMixer:
         return self.target_output_port
     
     
-    def create_frequency_mask(self, shape):
-        """Create a frequency mask based on region settings."""
+    def create_frequency_mask(self, shape, region_type='inner'):
+        """Create a frequency mask based on region settings for a given region_type."""
         if not self.region_enabled:
             return np.ones(shape, dtype=np.float64)
-        
+
+        if region_type not in ['inner', 'outer']:
+            region_type = 'inner'
+
         rows, cols = shape
         center_row, center_col = rows // 2, cols // 2
-        
+
         # Calculate region dimensions
         region_rows = int(rows * self.region_size)
         region_cols = int(cols * self.region_size)
-        
+
         # Ensure at least 1 pixel
         region_rows = max(1, region_rows)
         region_cols = max(1, region_cols)
-        
+
         # Create mask
         mask = np.zeros(shape, dtype=np.float64)
-        
+
         # Define rectangle bounds (centered)
         row_start = center_row - region_rows // 2
         row_end = center_row + region_rows // 2
         col_start = center_col - region_cols // 2
         col_end = center_col + region_cols // 2
-        
-        if self.region_type == 'inner':
+
+        if region_type == 'inner':
             # Include inner rectangle (low frequencies)
             mask[row_start:row_end, col_start:col_end] = 1.0
         else:
             # Include outer region (high frequencies)
             mask[:, :] = 1.0
             mask[row_start:row_end, col_start:col_end] = 0.0
-        
+
         return mask
     
     
     def apply_frequency_mask(self, fft_component):
-        """Apply frequency mask to an FFT component."""
-        mask = self.create_frequency_mask(fft_component.shape)
+        """Apply frequency mask to an FFT component using the default per-component settings.
+
+        This method assumes the caller will apply the appropriate mask for the
+        specific component type by calling `create_frequency_mask(shape, type)`.
+        For backward compatibility, this will apply the 'magnitude' mask.
+        """
+        mask = self.create_frequency_mask(fft_component.shape, self.per_component_region.get('magnitude', 'inner'))
         return fft_component * mask
     
     
@@ -234,47 +263,38 @@ class FourierMixer:
         mag_weights = np.array(self.weights['magnitude'])
         phase_weights = np.array(self.weights['phase'])
         
-        # Check if using same weights for mag and phase (pure mixing mode)
-        if np.allclose(mag_weights, phase_weights):
-            # Pure mixing: mix complex FFTs directly
-            mixed_fft = np.zeros(shape, dtype=np.complex128)
-            for i, processor in enumerate(self.processors):
-                # Skip empty processors
-                if processor.fft_result is None: continue
-                
-                if mag_weights[i] > 0:
-                    mixed_fft += mag_weights[i] * processor.fft_result
-            
-            mixed_fft = self.apply_frequency_mask(mixed_fft)
-            return mixed_fft
-        
-        else:
-            # Separate magnitude/phase mixing
-            mixed_magnitude = np.zeros(shape, dtype=np.float64)
-            mixed_phase = np.zeros(shape, dtype=np.float64)
-            
-            # STEP 1: Extract components
-            for i, processor in enumerate(self.processors):
-                if processor.fft_result is None: continue
+        # Always perform separate magnitude & phase mixing to support per-component masks
+        mixed_magnitude = np.zeros(shape, dtype=np.float64)
+        mixed_phase = np.zeros(shape, dtype=np.float64)
 
-                if mag_weights[i] > 0:
-                    magnitude = np.abs(processor.fft_result)
-                    mixed_magnitude += mag_weights[i] * magnitude
-            
-            for i, processor in enumerate(self.processors):
-                if processor.fft_result is None: continue
-                
-                if phase_weights[i] > 0:
-                    phase = np.angle(processor.fft_result)
-                    mixed_phase += phase_weights[i] * phase
-            
-            # STEP 2: Reconstruct complex FFT from mixed components
-            mixed_fft = mixed_magnitude * np.exp(1j * mixed_phase)
-            
-            # STEP 3: Apply mask to the MIXED result
-            mixed_fft = self.apply_frequency_mask(mixed_fft)
-            
-            return mixed_fft
+        # STEP 1: Extract and mix magnitude components
+        for i, processor in enumerate(self.processors):
+            if processor.fft_result is None: continue
+
+            if mag_weights[i] > 0:
+                magnitude = np.abs(processor.fft_result)
+                mixed_magnitude += mag_weights[i] * magnitude
+
+        # Apply magnitude mask if enabled (uses per-component region setting)
+        mag_mask = self.create_frequency_mask(shape, self.per_component_region.get('magnitude', 'inner'))
+        mixed_magnitude = mixed_magnitude * mag_mask
+
+        # STEP 2: Extract and mix phase components
+        for i, processor in enumerate(self.processors):
+            if processor.fft_result is None: continue
+
+            if phase_weights[i] > 0:
+                phase = np.angle(processor.fft_result)
+                mixed_phase += phase_weights[i] * phase
+
+        # Apply phase mask: where mask is 0, set phase to 0 to neutralize contribution
+        phase_mask = self.create_frequency_mask(shape, self.per_component_region.get('phase', 'inner'))
+        mixed_phase = mixed_phase * phase_mask
+
+        # STEP 3: Reconstruct complex FFT from mixed components
+        mixed_fft = mixed_magnitude * np.exp(1j * mixed_phase)
+
+        return mixed_fft
     
     
     def _mix_real_imaginary(self, shape):
@@ -301,12 +321,16 @@ class FourierMixer:
                 imag_part = np.imag(processor.fft_result)
                 mixed_imaginary += imag_weights[i] * imag_part
         
-        # STEP 3: Reconstruct complex FFT
+        # STEP 3: Apply per-component masks
+        real_mask = self.create_frequency_mask(shape, self.per_component_region.get('real', 'inner'))
+        imag_mask = self.create_frequency_mask(shape, self.per_component_region.get('imaginary', 'inner'))
+
+        mixed_real = mixed_real * real_mask
+        mixed_imaginary = mixed_imaginary * imag_mask
+
+        # STEP 4: Reconstruct complex FFT
         mixed_fft = mixed_real + 1j * mixed_imaginary
-        
-        # STEP 4: Apply mask
-        mixed_fft = self.apply_frequency_mask(mixed_fft)
-        
+
         return mixed_fft
     
     

@@ -27,7 +27,15 @@ export const useAppStore = create((set, get) => ({
       real: [0.5, 0.5, 0.5, 0.5],
       imaginary: [0.5, 0.5, 0.5, 0.5],
     },
-    region: { enabled: false, type: 'inner', size: 0.3 }
+    region: {
+        enabled: false,
+        size: 0.3, // Percentage 0.0 to 1.0 (unified for all)
+        // Individual selection for each component
+        magnitude: 'inner', 
+        phase: 'inner',
+        real: 'inner',
+        imaginary: 'inner'
+    }
   },
 
   processingStatus: { isProcessing: false, progress: 0 },
@@ -175,6 +183,15 @@ export const useAppStore = create((set, get) => ({
   setTargetOutput: (portId) => {
      set(state => ({ mixerSettings: { ...state.mixerSettings, targetOutputPort: portId } }));
   },
+setComponentRegionType: (component, type) => {
+    set(state => ({
+        mixerSettings: {
+        ...state.mixerSettings,
+        region: { ...state.mixerSettings.region, [component]: type }
+        }
+    }));
+    get().triggerMixing();
+},
   
   setWeight: (component, index, value) => {
     set(state => {

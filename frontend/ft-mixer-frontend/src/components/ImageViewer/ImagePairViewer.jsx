@@ -20,6 +20,7 @@ const ImagePairViewer = ({ id, title }) => {
   // Store separate image sources for each view
   const [originalSrc, setOriginalSrc] = React.useState(null);
   const [ftSrc, setFtSrc] = React.useState(null);
+  const containerFtRef = useRef(null);
   
   // Drag states for brightness/contrast
   const [isDraggingOriginal, setIsDraggingOriginal] = React.useState(false);
@@ -166,6 +167,55 @@ const ImagePairViewer = ({ id, title }) => {
     setIsDraggingFt(false);
   };
 
+  // Region overlay and resize (unified across images)
+  const mixerRegion = useAppStore(state => state.mixerSettings.region);
+  const setRegionSetting = useAppStore(state => state.setRegionSetting);
+  const setComponentRegionType = useAppStore(state => state.setComponentRegionType);
+  const [isResizing, setIsResizing] = React.useState(false);
+  const resizeStart = useRef({ x: 0, y: 0, startSize: 0 });
+
+  // Resize handlers
+  const onResizeMouseDown = (e) => {
+    e.stopPropagation();
+    setIsResizing(true);
+    resizeStart.current = { x: e.clientX, y: e.clientY, startSize: mixerRegion.size };
+  };
+
+  React.useEffect(() => {
+    if (!isResizing) return;
+    const onMouseMove = (e) => {
+      const rect = containerFtRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const minDim = Math.min(rect.width, rect.height);
+      // Compute new size by comparing distance from center to pointer
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const dx = Math.abs(e.clientX - centerX);
+      const dy = Math.abs(e.clientY - centerY);
+      const newRectSize = Math.max(dx, dy) * 2; // diameter
+      const newSize = Math.max(0.05, Math.min(0.95, newRectSize / minDim));
+      setRegionSetting('size', newSize);
+    };
+    const onMouseUp = () => setIsResizing(false);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isResizing, setRegionSetting, mixerRegion.size]);
+
+  // Compute rectangle position/size for overlay based on current container
+  const rectInfo = React.useMemo(() => {
+    const rect = containerFtRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const minDim = Math.min(rect.width, rect.height);
+    const rectSize = Math.max(10, mixerRegion.size * minDim);
+    const left = (rect.width - rectSize) / 2;
+    const top = (rect.height - rectSize) / 2;
+    return { left, top, rectSize, width: rect.width, height: rect.height };
+  }, [mixerRegion.size, containerFtRef.current, ftSrc]);
+
   return (
     <div className="flex flex-col h-full panel-bg panel-border">
       {/* Header */}
@@ -250,6 +300,7 @@ const ImagePairViewer = ({ id, title }) => {
             </select>
           </div>
           <div 
+            ref={containerFtRef}
             className="flex-1 min-h-0 relative bg-background overflow-hidden cursor-crosshair"
             onMouseDown={handleMouseDownFt}
             onMouseMove={handleMouseMoveFt}
@@ -273,6 +324,46 @@ const ImagePairViewer = ({ id, title }) => {
             {isDraggingFt && (
               <div className="absolute bottom-2 left-2 bg-black/70 text-xs p-1 rounded text-text-muted pointer-events-none">
                 B: {Math.round(imageState.brightness)}, C: {imageState.contrast.toFixed(2)}
+              </div>
+            )}
+
+            {/* Region Overlay (unified) */}
+            {mixerRegion.enabled && rectInfo && (
+              <div className="absolute inset-0 pointer-events-auto">
+                {/* Outer overlay for 'outer' selection; inner rect highlighted for 'inner' */}
+                {mixerRegion[ftView.toLowerCase()] === 'outer' ? (
+                  <>
+                    <div className="absolute inset-0 bg-primary/20"></div>
+                    <div
+                      className="absolute border-2 border-primary rounded pointer-events-none"
+                      style={{ left: rectInfo.left, top: rectInfo.top, width: rectInfo.rectSize, height: rectInfo.rectSize }}
+                    />
+                  </>
+                ) : (
+                  <div
+                    className="absolute bg-primary/25 border-2 border-primary rounded pointer-events-none"
+                    style={{ left: rectInfo.left, top: rectInfo.top, width: rectInfo.rectSize, height: rectInfo.rectSize }}
+                  />
+                )}
+
+                {/* Resize handle */}
+                <div
+                  onMouseDown={onResizeMouseDown}
+                  className="absolute w-4 h-4 bg-primary rounded-sm cursor-nwse-resize"
+                  style={{ left: rectInfo.left + rectInfo.rectSize - 8, top: rectInfo.top + rectInfo.rectSize - 8 }}
+                />
+
+                {/* Small control to toggle inner/outer for current FT component */}
+                <div className="absolute right-2 top-2 bg-background/90 border border-border rounded p-1 text-xs flex items-center space-x-1">
+                  <button
+                    className={`px-2 py-0.5 ${mixerRegion[ftView.toLowerCase()] === 'inner' ? 'bg-primary text-white' : 'text-text-muted'}`}
+                    onClick={() => setComponentRegionType(ftView.toLowerCase(), 'inner')}
+                  >Inner</button>
+                  <button
+                    className={`px-2 py-0.5 ${mixerRegion[ftView.toLowerCase()] === 'outer' ? 'bg-primary text-white' : 'text-text-muted'}`}
+                    onClick={() => setComponentRegionType(ftView.toLowerCase(), 'outer')}
+                  >Outer</button>
+                </div>
               </div>
             )}
           </div>

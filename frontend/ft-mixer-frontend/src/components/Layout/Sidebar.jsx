@@ -8,7 +8,7 @@ const Sidebar = () => {
   const [activeTab, setActiveTab] = React.useState('mixer');
   
   // Destructure resetWeights here
-  const { mixerSettings, setMixerMode, setTargetOutput, setWeight, setRegionSetting, processingStatus, resetWeights } = useAppStore();
+  const { mixerSettings, setMixerMode, setTargetOutput, setWeight, setRegionSetting, setComponentRegionType, processingStatus, resetWeights } = useAppStore();
   const { mode, targetOutputPort, weights, region } = mixerSettings;
 
   const isMagPhase = mode === 'magnitude_phase';
@@ -131,20 +131,23 @@ const Sidebar = () => {
              {/* Region Controls */}
              <div className={`space-y-4 transition-opacity ${region.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                  <div>
-                   <label className="text-sm font-medium text-text-muted block mb-2">Region Type</label>
-                   <div className="flex text-xs bg-background rounded border border-border overflow-hidden">
-                       <button
-                          className={`flex-1 py-2 ${region.type === 'inner' ? 'bg-primary text-white font-medium' : 'text-text-muted hover:text-text'}`}
-                          onClick={() => setRegionSetting('type', 'inner')}
-                       >
-                           Inner (Low Freq)
-                       </button>
-                       <button
-                          className={`flex-1 py-2 ${region.type === 'outer' ? 'bg-primary text-white font-medium' : 'text-text-muted hover:text-text'}`}
-                          onClick={() => setRegionSetting('type', 'outer')}
-                       >
-                           Outer (High Freq)
-                       </button>
+                   <label className="text-sm font-medium text-text-muted block mb-2">Per-Component Region Inclusion</label>
+                   <div className="grid grid-cols-2 gap-2 text-xs">
+                     {['magnitude', 'phase', 'real', 'imaginary'].map((comp) => (
+                       <div key={comp} className="flex items-center justify-between bg-background rounded border border-border p-2">
+                         <div className="text-xs text-text-muted capitalize">{comp}</div>
+                         <div className="flex bg-surface rounded overflow-hidden text-xs">
+                           <button
+                             className={`px-2 py-1 ${region[comp] === 'inner' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'}`}
+                             onClick={() => setComponentRegionType(comp, 'inner')}
+                           >Inner</button>
+                           <button
+                             className={`px-2 py-1 ${region[comp] === 'outer' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'}`}
+                             onClick={() => setComponentRegionType(comp, 'outer')}
+                           >Outer</button>
+                         </div>
+                       </div>
+                     ))}
                    </div>
                  </div>
                  
