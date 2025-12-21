@@ -40,6 +40,10 @@ class FourierMixer:
         # Region selection
         self.region_enabled = False
         self.region_size = 0.3  # 30% of image size (percentage)
+        self.region_x = 0.5  # Center X position (0-1)
+        self.region_y = 0.5  # Center Y position (0-1)
+        self.region_width = 0.3  # Width as percentage (0-1)
+        self.region_height = 0.3  # Height as percentage (0-1)
         # Per-component region types (allows 'inner'/'outer' per FFT component)
         self.per_component_region = {
             'magnitude': 'inner',
@@ -105,14 +109,35 @@ class FourierMixer:
         print(f"✅ Weights set for {component_type}: {weights}")
     
     
-    def set_region(self, size, region_type='inner', enabled=True):
+    def set_region(self, size=None, region_type='inner', enabled=True, x=None, y=None, width=None, height=None):
         """Set frequency region parameters.
 
         `region_type` may be either a string 'inner'/'outer' applied to all components,
         or a dict mapping component names to 'inner'/'outer'.
         """
-        if not 0.0 <= size <= 1.0:
-            raise ValueError("Region size must be between 0.0 and 1.0")
+        # Handle new width/height format or legacy size format
+        if width is not None and height is not None:
+            if not (0.0 <= width <= 1.0 and 0.0 <= height <= 1.0):
+                raise ValueError("Region width and height must be between 0.0 and 1.0")
+            self.region_width = width
+            self.region_height = height
+            self.region_size = (width + height) / 2  # For backward compatibility
+        elif size is not None:
+            if not 0.0 <= size <= 1.0:
+                raise ValueError("Region size must be between 0.0 and 1.0")
+            self.region_size = size
+            self.region_width = size
+            self.region_height = size
+        
+        # Handle position
+        if x is not None:
+            if not 0.0 <= x <= 1.0:
+                raise ValueError("Region x must be between 0.0 and 1.0")
+            self.region_x = x
+        if y is not None:
+            if not 0.0 <= y <= 1.0:
+                raise ValueError("Region y must be between 0.0 and 1.0")
+            self.region_y = y
 
         # Accept either dict or single type
         if isinstance(region_type, dict):
@@ -129,10 +154,9 @@ class FourierMixer:
             for comp in self.per_component_region.keys():
                 self.per_component_region[comp] = region_type
 
-        self.region_size = size
         self.region_enabled = enabled
 
-        print(f"✅ Region set: size={size*100}%, per_component={self.per_component_region}, enabled={enabled}")
+        print(f"✅ Region set: pos=({self.region_x:.2f},{self.region_y:.2f}), size=({self.region_width:.2f}x{self.region_height:.2f}), per_component={self.per_component_region}, enabled={enabled}")
     
     
     def set_region_from_coordinates(self, x1, y1, x2, y2, region_type='inner'):
@@ -186,31 +210,33 @@ class FourierMixer:
             region_type = 'inner'
 
         rows, cols = shape
-        center_row, center_col = rows // 2, cols // 2
 
-        # Calculate region dimensions
-        region_rows = int(rows * self.region_size)
-        region_cols = int(cols * self.region_size)
+        # Calculate region dimensions based on width and height
+        region_rows = int(rows * self.region_height)
+        region_cols = int(cols * self.region_width)
 
         # Ensure at least 1 pixel
         region_rows = max(1, region_rows)
         region_cols = max(1, region_cols)
 
+        # Calculate region center position
+        center_row = int(rows * self.region_y)
+        center_col = int(cols * self.region_x)
+
+        # Define rectangle bounds
+        row_start = max(0, center_row - region_rows // 2)
+        row_end = min(rows, center_row + region_rows // 2)
+        col_start = max(0, center_col - region_cols // 2)
+        col_end = min(cols, center_col + region_cols // 2)
+
         # Create mask
-        mask = np.zeros(shape, dtype=np.float64)
-
-        # Define rectangle bounds (centered)
-        row_start = center_row - region_rows // 2
-        row_end = center_row + region_rows // 2
-        col_start = center_col - region_cols // 2
-        col_end = center_col + region_cols // 2
-
         if region_type == 'inner':
-            # Include inner rectangle (low frequencies)
+            # Include only inner rectangle
+            mask = np.zeros(shape, dtype=np.float64)
             mask[row_start:row_end, col_start:col_end] = 1.0
         else:
-            # Include outer region (high frequencies)
-            mask[:, :] = 1.0
+            # Include everything EXCEPT inner rectangle (outer region)
+            mask = np.ones(shape, dtype=np.float64)
             mask[row_start:row_end, col_start:col_end] = 0.0
 
         return mask
@@ -263,7 +289,22 @@ class FourierMixer:
         mag_weights = np.array(self.weights['magnitude'])
         phase_weights = np.array(self.weights['phase'])
         
-        # Always perform separate magnitude & phase mixing to support per-component masks
+        # Check if using same weights for mag and phase (equal mixing case)
+        # In this case, use direct complex FFT mixing which is more mathematically correct
+        if np.allclose(mag_weights, phase_weights):
+            # Pure mixing: mix complex FFTs directly
+            mixed_fft = np.zeros(shape, dtype=np.complex128)
+            for i, processor in enumerate(self.processors):
+                if processor.fft_result is None: continue
+                
+                if mag_weights[i] > 0:
+                    mixed_fft += mag_weights[i] * processor.fft_result
+            
+            # Apply frequency mask if enabled
+            mixed_fft = self.apply_frequency_mask(mixed_fft)
+            return mixed_fft
+        
+        # Otherwise, perform separate magnitude & phase mixing
         mixed_magnitude = np.zeros(shape, dtype=np.float64)
         mixed_phase = np.zeros(shape, dtype=np.float64)
 

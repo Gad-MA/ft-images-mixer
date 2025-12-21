@@ -10,6 +10,8 @@ const createInitialImageState = (id, type) => ({
   componentType: type === 'input' ? 'Original' : 'Magnitude',
   brightness: 0,
   contrast: 1.0,
+  ftBrightness: 0,  // Separate brightness for FT components
+  ftContrast: 1.0,  // Separate contrast for FT components
   isLoading: false,
 });
 
@@ -29,12 +31,25 @@ export const useAppStore = create((set, get) => ({
     },
     region: {
         enabled: false,
-        size: 0.3, // Percentage 0.0 to 1.0 (unified for all)
-        // Individual selection for each component
-        magnitude: 'inner', 
-        phase: 'inner',
-        real: 'inner',
-        imaginary: 'inner'
+        mode: 'unified', // 'unified' or 'independent'
+        // Unified region settings (when mode = 'unified')
+        unified: {
+            x: 0.5, // Center X (0-1)
+            y: 0.5, // Center Y (0-1)
+            width: 0.3, // Width as percentage (0-1)
+            height: 0.3, // Height as percentage (0-1)
+            magnitude: 'inner',
+            phase: 'inner',
+            real: 'inner',
+            imaginary: 'inner'
+        },
+        // Per-image region settings (when mode = 'independent')
+        perImage: [
+            { x: 0.5, y: 0.5, width: 0.3, height: 0.3, magnitude: 'inner', phase: 'inner', real: 'inner', imaginary: 'inner' },
+            { x: 0.5, y: 0.5, width: 0.3, height: 0.3, magnitude: 'inner', phase: 'inner', real: 'inner', imaginary: 'inner' },
+            { x: 0.5, y: 0.5, width: 0.3, height: 0.3, magnitude: 'inner', phase: 'inner', real: 'inner', imaginary: 'inner' },
+            { x: 0.5, y: 0.5, width: 0.3, height: 0.3, magnitude: 'inner', phase: 'inner', real: 'inner', imaginary: 'inner' }
+        ]
     }
   },
 
@@ -54,7 +69,9 @@ export const useAppStore = create((set, get) => ({
           src: null,
           isLoading: true,
           brightness: 0,
-          contrast: 1.0
+          contrast: 1.0,
+          ftBrightness: 0,
+          ftContrast: 1.0
         };
         
         // Keep output images for comparison - they will be updated when mixing happens
@@ -91,6 +108,16 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  clearImage: (slotId) => {
+    set(state => {
+      const newInputs = [...state.inputImages];
+      newInputs[slotId] = createInitialImageState(slotId, 'input');
+      return { inputImages: newInputs };
+    });
+    // Trigger mixing to update outputs after clearing an image
+    get().triggerMixing();
+  },
+
   setComponentType: async (slotId, type, component) => {
     // Update component type
     set(state => {
@@ -117,12 +144,36 @@ export const useAppStore = create((set, get) => ({
             // Contrast: 0 to 5 (Where 1 is default)
             const newC = Math.max(0, Math.min(5.0, cValue));
 
-            newImages[slotId].brightness = newB;
-            newImages[slotId].contrast = newC;
+            // Create a new object reference so React detects the change
+            newImages[slotId] = {
+                ...newImages[slotId],
+                brightness: newB,
+                contrast: newC
+            };
             return { [targetArray]: newImages };
         });
         // DO NOT call fetchImageView here. 
         // We handle B/C strictly in CSS for performance and data integrity.
+    },
+
+    setFtBrightnessContrast: (slotId, bValue, cValue) => {
+        set(state => {
+            const newImages = [...state.inputImages];
+            
+            // Clamp values to valid CSS ranges
+            // Brightness: -100 to 100 (Where 0 is default)
+            const newB = Math.max(-100, Math.min(100, bValue));
+            // Contrast: 0 to 5 (Where 1 is default)
+            const newC = Math.max(0, Math.min(5.0, cValue));
+
+            // Create a new object reference so React detects the change
+            newImages[slotId] = {
+                ...newImages[slotId],
+                ftBrightness: newB,
+                ftContrast: newC
+            };
+            return { inputImages: newImages };
+        });
     },
 
     fetchImageView: async (slotId, type) => {
@@ -210,6 +261,36 @@ setComponentRegionType: (component, type) => {
               region: { ...state.mixerSettings.region, [key]: value }
           }
       }));
+      get().triggerMixing();
+  },
+
+  setUnifiedRegion: (key, value) => {
+      set(state => ({
+          mixerSettings: {
+              ...state.mixerSettings,
+              region: {
+                  ...state.mixerSettings.region,
+                  unified: { ...state.mixerSettings.region.unified, [key]: value }
+              }
+          }
+      }));
+      get().triggerMixing();
+  },
+
+  setPerImageRegion: (imageIndex, key, value) => {
+      set(state => {
+          const newPerImage = [...state.mixerSettings.region.perImage];
+          newPerImage[imageIndex] = { ...newPerImage[imageIndex], [key]: value };
+          return {
+              mixerSettings: {
+                  ...state.mixerSettings,
+                  region: {
+                      ...state.mixerSettings.region,
+                      perImage: newPerImage
+                  }
+              }
+          };
+      });
       get().triggerMixing();
   },
 

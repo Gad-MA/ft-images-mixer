@@ -8,7 +8,7 @@ const Sidebar = () => {
   const [activeTab, setActiveTab] = React.useState('mixer');
   
   // Destructure resetWeights here
-  const { mixerSettings, setMixerMode, setTargetOutput, setWeight, setRegionSetting, setComponentRegionType, processingStatus, resetWeights } = useAppStore();
+  const { mixerSettings, setMixerMode, setTargetOutput, setWeight, setRegionSetting, setUnifiedRegion, setComponentRegionType, processingStatus, resetWeights } = useAppStore();
   const { mode, targetOutputPort, weights, region } = mixerSettings;
 
   const isMagPhase = mode === 'magnitude_phase';
@@ -128,8 +128,27 @@ const Sidebar = () => {
                  />
              </div>
 
-             {/* Region Controls */}
-             <div className={`space-y-4 transition-opacity ${region.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+             {/* Region Mode Selector */}
+             <div className={`transition-opacity ${region.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                 <label className="text-sm font-medium text-text-muted block mb-2">Region Mode</label>
+                 <div className="flex bg-surface rounded overflow-hidden border border-border">
+                   <button
+                     className={`flex-1 px-3 py-2 text-xs ${region.mode === 'unified' ? 'bg-primary text-white' : 'text-text-muted hover:text-text hover:bg-surface-lighter'}`}
+                     onClick={() => setRegionSetting('mode', 'unified')}
+                   >Unified (Synced)</button>
+                   <button
+                     className={`flex-1 px-3 py-2 text-xs ${region.mode === 'independent' ? 'bg-primary text-white' : 'text-text-muted hover:text-text hover:bg-surface-lighter'}`}
+                     onClick={() => setRegionSetting('mode', 'independent')}
+                   >Independent</button>
+                 </div>
+                 <p className="text-xs text-text-muted mt-1">
+                   {region.mode === 'unified' ? 'All images share the same region' : 'Each image has its own region'}
+                 </p>
+             </div>
+
+             {/* Region Controls - Only show for unified mode */}
+             {region.mode === 'unified' && (
+               <div className={`space-y-4 transition-opacity ${region.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                  <div>
                    <label className="text-sm font-medium text-text-muted block mb-2">Per-Component Region Inclusion</label>
                    <div className="grid grid-cols-2 gap-2 text-xs">
@@ -138,12 +157,12 @@ const Sidebar = () => {
                          <div className="text-xs text-text-muted capitalize">{comp}</div>
                          <div className="flex bg-surface rounded overflow-hidden text-xs">
                            <button
-                             className={`px-2 py-1 ${region[comp] === 'inner' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'}`}
-                             onClick={() => setComponentRegionType(comp, 'inner')}
+                             className={`px-2 py-1 ${region.unified[comp] === 'inner' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'}`}
+                             onClick={() => setUnifiedRegion(comp, 'inner')}
                            >Inner</button>
                            <button
-                             className={`px-2 py-1 ${region[comp] === 'outer' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'}`}
-                             onClick={() => setComponentRegionType(comp, 'outer')}
+                             className={`px-2 py-1 ${region.unified[comp] === 'outer' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'}`}
+                             onClick={() => setUnifiedRegion(comp, 'outer')}
                            >Outer</button>
                          </div>
                        </div>
@@ -151,18 +170,24 @@ const Sidebar = () => {
                    </div>
                  </div>
                  
-                 <Slider
-                    label="Region Size"
-                    value={region.size}
-                    min={0.05} max={0.95}
-                    onChange={(val) => setRegionSetting('size', val)}
-                 />
-
                  <div className="bg-surface-lighter border border-border rounded p-3 text-xs text-text-muted">
-                   <p className="mb-2"><strong>Inner Region:</strong> Mixes only low frequencies (center of FFT spectrum)</p>
-                   <p><strong>Outer Region:</strong> Mixes only high frequencies (edges of FFT spectrum)</p>
+                   <p className="mb-2"><strong>Drag</strong> the region on any image to move it</p>
+                   <p className="mb-2"><strong>Resize</strong> by dragging the corner handles</p>
+                   <p className="mb-2"><strong>Inner:</strong> Mix only low frequencies (center)</p>
+                   <p><strong>Outer:</strong> Mix only high frequencies (edges)</p>
                  </div>
-             </div>
+               </div>
+             )}
+
+             {/* Independent Mode Info */}
+             {region.mode === 'independent' && region.enabled && (
+               <div className="bg-surface-lighter border border-border rounded p-3 text-xs text-text-muted space-y-2">
+                 <p><strong>Independent Mode:</strong> Each image has its own region</p>
+                 <p>• <strong>Drag</strong> each region to reposition</p>
+                 <p>• <strong>Resize</strong> using corner handles</p>
+                 <p>• Configure per-component settings on each image</p>
+               </div>
+             )}
           </div>
         )}
 

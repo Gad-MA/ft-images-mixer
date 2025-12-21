@@ -300,19 +300,31 @@ class BackendAPI:
             if len(loaded_processors) == 0:
                 return {'success': False, 'error': 'No images loaded'}
             
-            # Check if FFT computed for all loaded images
-            if any(p.fft_result is None for p in loaded_processors):
-                return {
-                    'success': False,
-                    'error': 'Not all loaded images have FFT computed. Call resize_all_images() first.'
-                }
+            # Auto-resize all images to common size if needed
+            image_shapes = [p.image.shape for p in loaded_processors]
+            if len(set(image_shapes)) > 1:
+                # Images have different sizes - resize to smallest common size
+                min_height = min(p.image.shape[0] for p in loaded_processors)
+                min_width = min(p.image.shape[1] for p in loaded_processors)
+                target_size = (min_width, min_height)
+                
+                print(f"⚠️  Image size mismatch detected. Auto-resizing to {target_size}")
+                for processor in loaded_processors:
+                    if processor.image.shape[:2] != (min_height, min_width):
+                        processor.resize_image(target_size)
+                        processor.compute_fft()
             
-            # Validate uniform FFT shapes
+            # Ensure FFT computed for all loaded images
+            for processor in loaded_processors:
+                if processor.fft_result is None:
+                    processor.compute_fft()
+            
+            # Final validation of uniform FFT shapes
             fft_shapes = [p.fft_result.shape for p in loaded_processors]
             if len(set(fft_shapes)) > 1:
                 return {
                     'success': False,
-                    'error': f'Image sizes mismatch: {fft_shapes}. Call resize_all_images() first.'
+                    'error': f'Image sizes still mismatch after resize: {fft_shapes}'
                 }
             
             # Create mixer with ONLY active processors
@@ -341,20 +353,50 @@ class BackendAPI:
                 self.mixer.set_weights('imaginary', imag_weights)
 
             
-            # Set region (support per-component region types sent from frontend)
+            # Set region (support per-component region types and new position/size format)
             region = settings.get('region', {})
             if region.get('enabled', False):
-                # If frontend sent per-component keys, forward them as a dict
-                if any(k in region for k in ['magnitude', 'phase', 'real', 'imaginary']):
-                    region_type = {k: region.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+                region_mode = region.get('mode', 'unified')
+                
+                if region_mode == 'unified':
+                    # Unified mode - single region for all images
+                    unified = region.get('unified', {})
+                    region_type = {k: unified.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+                    
+                    # Get position and dimensions
+                    x = unified.get('x', 0.5)
+                    y = unified.get('y', 0.5)
+                    width = unified.get('width', 0.3)
+                    height = unified.get('height', 0.3)
+                    
+                    self.mixer.set_region(
+                        x=x,
+                        y=y,
+                        width=width,
+                        height=height,
+                        region_type=region_type,
+                        enabled=True
+                    )
                 else:
-                    region_type = region.get('type', 'inner')
-
-                self.mixer.set_region(
-                    size=region.get('size', 0.3),
-                    region_type=region_type,
-                    enabled=True
-                )
+                    # Independent mode - per-image regions
+                    # For now, use the first image's region settings (will enhance later for true per-image support)
+                    per_image = region.get('perImage', [])
+                    if per_image and len(per_image) > 0:
+                        first_region = per_image[0]
+                        region_type = {k: first_region.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+                        x = first_region.get('x', 0.5)
+                        y = first_region.get('y', 0.5)
+                        width = first_region.get('width', 0.3)
+                        height = first_region.get('height', 0.3)
+                        
+                        self.mixer.set_region(
+                            x=x,
+                            y=y,
+                            width=width,
+                            height=height,
+                            region_type=region_type,
+                            enabled=True
+                        )
             else:
                 self.mixer.set_region(size=0.3, region_type='inner', enabled=False)
             
@@ -411,6 +453,25 @@ class BackendAPI:
                 callback({'success': False, 'error': 'No images loaded'}, 0)
                 return
             
+            # Auto-resize all images to common size if needed
+            image_shapes = [p.image.shape for p in loaded_processors]
+            if len(set(image_shapes)) > 1:
+                # Images have different sizes - resize to smallest common size
+                min_height = min(p.image.shape[0] for p in loaded_processors)
+                min_width = min(p.image.shape[1] for p in loaded_processors)
+                target_size = (min_width, min_height)
+                
+                print(f"⚠️  Image size mismatch detected. Auto-resizing to {target_size}")
+                for processor in loaded_processors:
+                    if processor.image.shape[:2] != (min_height, min_width):
+                        processor.resize_image(target_size)
+                        processor.compute_fft()
+            
+            # Ensure FFT computed for all loaded images
+            for processor in loaded_processors:
+                if processor.fft_result is None:
+                    processor.compute_fft()
+            
             # Create mixer with ONLY loaded processors
             self.mixer = FourierMixer(loaded_processors)
             
@@ -436,16 +497,45 @@ class BackendAPI:
                 self.mixer.set_weights('imaginary', imag_weights)
             
             region = settings.get('region', {})
-            if any(k in region for k in ['magnitude', 'phase', 'real', 'imaginary']):
-                region_type = {k: region.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+            if region.get('enabled', False):
+                region_mode = region.get('mode', 'unified')
+                
+                if region_mode == 'unified':
+                    unified = region.get('unified', {})
+                    region_type = {k: unified.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+                    x = unified.get('x', 0.5)
+                    y = unified.get('y', 0.5)
+                    width = unified.get('width', 0.3)
+                    height = unified.get('height', 0.3)
+                    
+                    self.mixer.set_region(
+                        x=x,
+                        y=y,
+                        width=width,
+                        height=height,
+                        region_type=region_type,
+                        enabled=True
+                    )
+                else:
+                    per_image = region.get('perImage', [])
+                    if per_image and len(per_image) > 0:
+                        first_region = per_image[0]
+                        region_type = {k: first_region.get(k, 'inner') for k in ['magnitude', 'phase', 'real', 'imaginary']}
+                        x = first_region.get('x', 0.5)
+                        y = first_region.get('y', 0.5)
+                        width = first_region.get('width', 0.3)
+                        height = first_region.get('height', 0.3)
+                        
+                        self.mixer.set_region(
+                            x=x,
+                            y=y,
+                            width=width,
+                            height=height,
+                            region_type=region_type,
+                            enabled=True
+                        )
             else:
-                region_type = region.get('type', 'inner')
-
-            self.mixer.set_region(
-                size=region.get('size', 0.3),
-                region_type=region_type,
-                enabled=region.get('enabled', False)
-            )
+                self.mixer.set_region(size=0.3, region_type='inner', enabled=False)
             
             # Set the target output port in the mixer
             output_port = settings.get('output_port', 0)

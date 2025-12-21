@@ -83,6 +83,7 @@ class ImageProcessor:
     def resize_image(self, target_size):
         """
         Resize the image to target dimensions.
+        Also resizes the color_image to maintain consistency.
         
         Args:
             target_size (tuple): (width, height) for the new size
@@ -93,6 +94,7 @@ class ImageProcessor:
         if self.image is None:
             raise ValueError("❌ No image loaded. Call load_image() first.")
         
+        # Resize grayscale image
         # Convert numpy array to PIL Image for resizing
         if self.image.dtype != np.uint8:
             # Normalize to 0-255 range if needed
@@ -108,6 +110,23 @@ class ImageProcessor:
         
         # Convert back to numpy array
         self.image = np.array(resized_pil, dtype=np.float64)
+        
+        # Also resize color_image if it exists to maintain size consistency
+        if self.color_image is not None:
+            # Handle both grayscale and colored versions
+            if self.color_image.dtype != np.uint8:
+                color_normalized = np.clip(self.color_image, 0, 255).astype(np.uint8)
+            else:
+                color_normalized = self.color_image
+            
+            # For grayscale, convert to 2D before creating PIL image
+            if len(color_normalized.shape) == 2:
+                pil_color = Image.fromarray(color_normalized, mode='L')
+            else:
+                pil_color = Image.fromarray(color_normalized)
+            
+            resized_color = pil_color.resize(target_size, Image.LANCZOS)
+            self.color_image = np.array(resized_color, dtype=np.float64)
         
         # Invalidate FFT cache since image dimensions changed
         self.fft_cached = False
